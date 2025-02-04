@@ -1,5 +1,5 @@
 # woody-woodpacker
-> The goal of this project is to code a program that will at first encrypt a program given as parameter.
+> This program is a basic code injection in a ELF 64 binary.
 
 
 ### Summary
@@ -11,7 +11,7 @@
 	- [64 bits ELF](#64-bits-elf)
 	- [Encruption algorithms](#encryption-algorithms)
 	- [Compression methods](#compression-methods)
-- [Objectives](#)
+- [Objectives](#objectives)
 
 
 ## Notions and theory
@@ -60,6 +60,7 @@ As **popular encryption algorithms** we can list:
 - **RSA Security**: asymmetrical, standard for encrypting data sent over the internet
 - **Blowfish**: symmetrical, quick and effective. Used, for example, to secure payment on ecommerce platforms
 - **Twofish**: symmetrical, fastest of its kind, ideal in hardware and software environments
+
 Source: [https://www.arcserve.com/blog/5-common-encryption-algorithms-and-unbreakables-future](https://www.arcserve.com/blog/5-common-encryption-algorithms-and-unbreakables-future)
 
 ### Compression methods
@@ -76,3 +77,20 @@ Example of **compression algotrithms**:
 - **Perceptual coding**: mainly used in video and audio encoding. It removes data that are not easily perceived by humans as repetitive patterns while maintaining an acceptable quality
 
 Source: [https://www.seagate.com/fr/fr/blog/what-is-data-compression/](https://www.seagate.com/fr/fr/blog/what-is-data-compression/)
+
+## Objectives
+The objective of the program is to **encrypt** a program given as parameter and **inject** code at the beginning of it. A **new executable** will generated. This new binary will have to be **decrypted** before execution and behave as the original program in the last step.
+
+### Why encrypt?
+From **attackers**, encryption permits to "**hindering** forensic analysis in case of detection, hindering copying of confidential data, adding functionality to the protected binary.<br>
+From **defender**, adding a level of authorization checks, hindering analysis of customised intrusion detection tools , adding functionality to the protected binary.
+
+In our case, we want our binary to be sure that only athorised individuals executes the binary and to obscure or hide the "new" binary and/or the way it works.<br>
+For encryption we will use a very simple encryption method called the **XOR cipher**. This method consists by simply pass the bytes of the binary through a binary XOR operator with a fixed value.
+
+## ELF infection
+ELF infection consists, like the subject asks, in inserting code in an existing executable without altering its original behaviour. The memory of executables are organised as aligned pages. It basically means that in memory segments constituting pages that are not entirely filled with the text and data, padding will we added before or after data to fill them. We will use this padding to insert our code.<br>
+Then to execute the parasite, the ELF header where information about the executable including the virtual address of the entrypoint. The parasite will then have to give the control back to the executable.
+
+To do so, we will have to go from a section to another starting from the elf header. In our C program it can be done using structure that are predefined in elf.h.<br>
+In this structure the usefull members are "e_entry" (gives vritual address of the program's entrypoint), "e_phoff" (gives the file offset for the start of the program header table).<br>
