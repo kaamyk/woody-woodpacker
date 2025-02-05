@@ -4,3 +4,8 @@
 **/*.d
 **/.obj
 **/.dep
+**/woody
+**/woody_woodpacker
+**/op_code
+**/*/*.o
+**/*/*.d

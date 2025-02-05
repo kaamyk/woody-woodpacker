@@ -1,12 +1,12 @@
 .SILENT:
 	
-NAME	=	woody	
+NAME	=	woody_woodpacker	
 
 CC		=	gcc
 CC_FLAGS	=	-Wall -Wextra -Werror -g3
 
 C_SRCDIR	=	src/c
-C_SRCS	=	$(C_SRCDIR)/main.c
+C_SRCS	=	$(C_SRCDIR)/main.c	$(C_SRCDIR)/error.c
 OBJDIR	=	.obj
 OBJS	=	$(patsubst $(C_SRCDIR)/%.c, $(OBJDIR)/%.o, $(C_SRCS))
 DEPDIR	=	.dep

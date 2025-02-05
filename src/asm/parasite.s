@@ -14,3 +14,4 @@ _start:
 	mov edx, 16
 	int	0x80
 	popa
+	jmp 0xffffffff

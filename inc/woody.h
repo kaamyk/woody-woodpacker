@@ -13,3 +13,4 @@
 
 //	ERROR.C
 void	*ptr_perror( const char *, const int );
+bool	bool_perror( const char *err_mess, int err_code );
