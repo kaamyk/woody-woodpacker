@@ -24,9 +24,16 @@ $(OBJDIR)/%.o:	$(C_SRCDIR)/%.c
 	$(CC) $(CC_FLAGS) -MM $< | sed 's,\($*\)\.o[ :]*,$(DEPDIR)/\1.o $@ : ,g' > $(DEPDIR)/$*.d
 	echo -e '\x1b[32m>>> OK <<<\x1b[37m'
 
-all:		$(OBJDIR) $(DEPDIR) $(OBJ) $(NAME)
+parasite:
+	echo -n "Creating parasite opcode file 'woody' ... "
+	cd ./src/asm
+	bash ./src/asm/generate_sh_code.sh
+	cd ../../
+	echo -e '\x1b[32m>>> OK <<<\x1b[37m'
 
-$(NAME):	 $(OBJDIR) $(DEPDIR) $(OBJS)
+all:		$(OBJDIR) $(DEPDIR) $(OBJS) $(PARASITE) $(NAME)
+
+$(NAME):	 $(OBJDIR) $(DEPDIR) $(OBJS) parasite
 	echo -e '\033[0;34mObjects compilation: \x1b[32m>>> OK <<<\x1b[37m'
 	echo ""
 	echo -n "Compiling " $(NAME) " ... "
@@ -36,15 +43,21 @@ $(NAME):	 $(OBJDIR) $(DEPDIR) $(OBJS)
 	echo -n  $(NAME)
 	echo -e  ' compiled: \x1b[32m>>> OK <<<\x1b[37m'
 	echo ""
-
+	
 clean:
 	rm -rfv $(OBJDIR) $(DEPDIR)
 	echo -e '\033[0;34mObject/Dependencies files removed: \x1b[32m>>> OK <<<\x1b[37m'
 	echo ""
+	rm -fv src/asm/parasite.o
+	echo -e '\033[0;34mParsite object file removed: \x1b[32m>>> OK <<<\x1b[37m'
+	echo ""
 
 fclean:		clean
-	rm -rfv $(NAME) $(NAME).d
+	rm -fv $(NAME) $(NAME).d
 	echo -e '\033[0;34mExecutable file removed: \x1b[32m>>> OK <<<\x1b[37m'
+	echo ""
+	rm -fv src/asm/opcode 
+	echo -e '\033[0;34mParasite 'opcode' file removed: \x1b[32m>>> OK <<<\x1b[37m'
 	echo ""
 
 -include $(DEPS)

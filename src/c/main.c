@@ -87,12 +87,12 @@ void	modify_entrypoint( Elf64_Ehdr *ehdr, Elf64_Phdr *phdr, const long opcode_le
 {
 	write(STDOUT_FILENO, "Generating new entry point ... ", 31);
 	(void) opcode_len;
-	ehdr->e_entry = (long)ehdr + phdr->p_offset + phdr->p_filesz;
+	ehdr->e_entry = (Elf64_Addr)ehdr + phdr->p_offset + phdr->p_filesz;
 	write(STDOUT_FILENO, "OK\n", 3);
 	printf("New entry point is -> 0x%lx\n", ehdr->e_entry);
 }
 
-void	modify_parasite_jmp( const int original_entry, uint8_t *parasite_code, const long parasite_len )
+void	modify_parasite_jmp( const Elf64_Addr original_entry, uint8_t *parasite_code, const long parasite_len )
 {
 	write(STDOUT_FILENO, "Modifying jmp instruction ... ", 30);
 	long	index_jmp = 0;
@@ -106,9 +106,9 @@ void	modify_parasite_jmp( const int original_entry, uint8_t *parasite_code, cons
 		write(STDOUT_FILENO, "jmp instruction not found\n", 27);
 		return ;
 	}
-	for (uint8_t i = 0; i < 4; i++)
+	for (uint8_t i = 0; i < 8; i++)
 	{
-		(parasite_code + index_jmp)[i + 1] = original_entry >> i;
+		(parasite_code + index_jmp)[i + 1] = (uint8_t)original_entry >> i;
 	}
 	write(STDOUT_FILENO, "OK\n", 3);
 }
@@ -120,32 +120,14 @@ void	insert_code( void *cave, uint8_t *parasite_opcode, const long parasite_len 
 	write(STDOUT_FILENO, "OK\n", 3);
 }
 
-bool	create_duplicated_file( void *ptr, long map_size )
-{
-	write(STDOUT_FILENO, "Creating the duplicate ... ", 27);
-	int	fd = open("woody", O_CREAT | O_TRUNC | O_WRONLY, S_IRWXU);
-	if (fd == -1)
-		return (bool_perror("KO\nFailed to create duplicate", errno));
-	
-	write(STDOUT_FILENO, "OK\nWriting in file ... ", 24);
-	if (write(fd, (char *)ptr, map_size) == -1)
-	{
-		close(fd);
-		return (bool_perror("KO\nFailed to write in duplicate", errno));
-	}
-	write(STDOUT_FILENO, "OK\n", 3);
-	close(fd);
-	return (0);
-}
-
-void	inject_code( void *ptr, const long map_size )
+void	inject_code( void *ptr )
 {
 	uint8_t	*parasite_opcode = NULL;
 	long	parasite_len = 0;
 	Elf64_Ehdr	*ehdr = ptr;
 	Elf64_Phdr	*phdr = (void *)ptr + ehdr->e_phoff;
 	Elf64_Phdr	*cave_segment = NULL;
-	const int original_entry = ehdr->e_entry;
+	const Elf64_Addr original_entry = ehdr->e_entry;
 	(void) original_entry;
 
 	if (get_parasite_opcode(&parasite_opcode, &parasite_len) == NULL || parasite_opcode == NULL)
@@ -155,12 +137,33 @@ void	inject_code( void *ptr, const long map_size )
 		goto end_injection;
 	printf("Cave selected is %ld bytes long\n", (cave_segment + 1)->p_offset - (cave_segment->p_offset + cave_segment->p_filesz));
 	modify_entrypoint(ehdr, phdr, parasite_len);
+	printf("Original entrypoint is 0x%lx | New entrypoint is 0x%lx\n", original_entry, ehdr->e_entry);
 	modify_parasite_jmp(original_entry, parasite_opcode, parasite_len);
 	insert_code(ptr + cave_segment->p_offset + cave_segment->p_filesz, parasite_opcode, parasite_len);
-	create_duplicated_file(ptr, map_size);
 	
 	end_injection:
 		free(parasite_opcode);
+}
+
+int	create_duplicated_file( void *ptr, long map_size )
+{
+	write(STDOUT_FILENO, "Creating the duplicate ... ", 27);
+	int	fd = open("woody", O_CREAT | O_TRUNC | O_RDWR, S_IRWXU);
+	if (fd == -1)
+	{
+		(void) bool_perror("KO\nFailed to create duplicate", errno);
+		return (fd);
+	}
+	
+	write(STDOUT_FILENO, "OK\nWriting in file ... ", 24);
+	if (write(fd, (char *)ptr, map_size) == -1)
+	{
+		close(fd);
+		(void) bool_perror("KO\nFailed to write in duplicate", errno);
+		return (-1);
+	}
+	write(STDOUT_FILENO, "OK\n", 3);
+	return (fd);
 }
 
 int	main( int argc, char **argv )
@@ -175,7 +178,7 @@ int	main( int argc, char **argv )
 		exit_error("Failed", errno);
 	write(STDOUT_FILENO, "OK\n", 3);
 
-	struct stat	f_stat;
+	struct stat	f_stat = {0};
 	if (fstat(fd, &f_stat) == -1)
 		exit_error("fstat: failed", errno);
 
@@ -185,7 +188,6 @@ int	main( int argc, char **argv )
 		exit_error("mmap: failed", errno);
 	write(STDOUT_FILENO, "OK\n", 3);
 	printf("New map address -> %p\n", ptr);
-	
 
 	write(STDOUT_FILENO, "Checking format ... ", 20);
 	fflush(stdout);
@@ -193,9 +195,20 @@ int	main( int argc, char **argv )
 		exit_error("\nFormat error: file must be ELF64", 0);
 	write(STDOUT_FILENO, "OK\n", 3);
 
-	inject_code(ptr, f_stat.st_size);
-	
+	int	dupfd = create_duplicated_file(ptr, f_stat.st_size);
+	if (dupfd == -1)
+		return (1);
 	munmap(ptr, f_stat.st_size);
 	close(fd);
+	
+	if (fstat(dupfd, &f_stat) == -1)
+		exit_error("fstat: failed", errno);
+	ptr = mmap(NULL, f_stat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, dupfd, 0);
+	if (ptr == MAP_FAILED)
+		exit_error("mmap: failed", errno);
+	inject_code(ptr);
+	
+	munmap(ptr, f_stat.st_size);
+	close(dupfd);
 	return (0);
 }
