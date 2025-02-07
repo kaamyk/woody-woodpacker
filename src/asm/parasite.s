@@ -1,17 +1,19 @@
-BITS    32
-
-section .data
-woody_str db '....WOODY.....', 0xA, 0xD , 0x0
+BITS    64
 
 section .text
 	global _start
 
 _start:
-	pusha
-	mov eax, 0x4
-	mov ebx, 0x1 
-	mov ecx, woody_str
-	mov edx, 16
+	mov rax, 0x4
+	mov rbx, 0x1 
+	mov rcx, woody_str
+	mov rdx, 16
 	int	0x80
-	popa
+	xor rax, rax
+	xor rdi, rdi
+	xor rdx, rdx
+	xor rsi, rsi
 	jmp 0xffffffff
+
+align 8
+	woody_str db '....WOODY.....', 0xA, 0x0
