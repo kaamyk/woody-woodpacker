@@ -4,11 +4,10 @@ section .text
 	global _start
 
 _start:
-	mov rax, 0x4
-	mov rbx, 0x1 
-	mov rcx, woody_str
+	mov rdi, 0x1
+	mov rsi, woody_str
 	mov rdx, 16
-	int	0x80
+	syscall
 	xor rax, rax
 	xor rdi, rdi
 	xor rdx, rdx

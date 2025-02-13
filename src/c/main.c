@@ -15,11 +15,25 @@ void	exit_error( const char *err_str, const int err_code )
 	exit(2);
 }
 
+void	print_hexa( const uint8_t *p, const size_t len )
+{
+	printf("Printing memory area from %p to %p ... \n", p, p+len);
+	for (size_t i = 0; i < len; i++)
+	{
+		if (i != 0 && i % 8 == 0)
+			printf("\n");
+		else if (i != 0 && i % 4 == 0)
+			printf("   ");
+		printf("%.2x ", p[i]);
+	}
+	printf("\n");
+}
+
 bool	is_elf64( const char *ptr, const off_t size )
 {
 	return (ptr[EI_MAG1] == 'E' && ptr[EI_MAG2] == 'L'
-		 && ptr[EI_MAG3] == 'F' && ptr[EI_CLASS] == ELFCLASS64
-		 && (unsigned long) size > sizeof(Elf64_Ehdr));
+		&& ptr[EI_MAG3] == 'F' && ptr[EI_CLASS] == ELFCLASS64
+		&& (unsigned long) size > sizeof(Elf64_Ehdr));
 }
 
 bool	cave_size_ok(const Elf64_Phdr *phdr, const long file_len )
@@ -55,68 +69,86 @@ const uint8_t	*get_parasite_opcode( uint8_t **opcode_buf, long *opcode_len )
 		fclose(opcode_file);
 		return ((const uint8_t *)ptr_perror("woody: failed to read the file './src/asm/opcode'\n", 0));
 	}
-	for (long i = 0; i < *opcode_len; i++)
-	{
-		printf(" 0x%.2x", opcode_buf[0][i]);
-	}
-	printf("\n");
 	fclose(opcode_file);
+	printf("opcode len == %ld\n", *opcode_len);
 	return (*opcode_buf);
 }
 
-Elf64_Phdr *find_cave( Elf64_Ehdr *elf_h, Elf64_Phdr *phdr, const long opcode_len )
+Elf64_Phdr *find_cave_segment( Elf64_Ehdr *elf_h, Elf64_Phdr *phdr, const long opcode_len )
 {
+	uint8_t	load_nb = 0;
 	write(STDOUT_FILENO, "Looking for a cave ... ", 23);
-	for (size_t i = 0; i < elf_h->e_phnum; i++)
+	for (size_t i = 0; i < elf_h->e_phnum; i++, phdr++)
 	{
-		if (phdr->p_type == PT_LOAD && (phdr->p_flags & PF_X) && phdr->p_filesz > 0 && phdr->p_memsz == phdr->p_filesz)
+		if (phdr->p_type == PT_LOAD && (phdr + 1)->p_type == PT_LOAD && ++load_nb && (phdr->p_flags & PF_X) && phdr->p_filesz > 0 && phdr->p_memsz == phdr->p_filesz)
 		{
-			write(STDOUT_FILENO, "Cave found!\nChecking cave's size ... ", 38);
+			printf("Cave found at %p!\nChecking cave's size ... (segment %ld | LOAD %hhu)", 
+				(void *)(phdr->p_vaddr + phdr->p_filesz), i, load_nb);
 			if (cave_size_ok(phdr, opcode_len) == 0)
 				write(STDOUT_FILENO, "Too small. Continuing\n", 23);
 			write(STDOUT_FILENO, "Cave is valid\n", 15);
 			return (phdr);
 		}
-		phdr++;
+		
 	}
 	write(STDOUT_FILENO, "No valid cave found ...\nQuitting\n", 33);
 	return (NULL);
 }
 
-void	modify_entrypoint( Elf64_Ehdr *ehdr, Elf64_Phdr *cave_segment, const long parasite_len )
+Elf64_Shdr	*find_cave_section( Elf64_Ehdr *ehdr, Elf64_Shdr *shdr )
+{
+	write(STDOUT_FILENO, "Looking for the section ... ", 28);
+	for (size_t i = 0; i < ehdr->e_shnum; i++, shdr++)
+	{
+		if (shdr->sh_offset == 0x1168 && (shdr->sh_flags & SHF_EXECINSTR))
+		{
+			write(STDOUT_FILENO, "OK\n", 3);
+			return (shdr);
+		}
+	}
+	return (NULL);
+}
+
+void	modify_entrypoint( Elf64_Ehdr *ehdr, Elf64_Phdr *cave_segment )
 {
 	write(STDOUT_FILENO, "Generating new entry point ... ", 31);
-	ehdr->e_entry = (Elf64_Addr)(cave_segment->p_vaddr + cave_segment->p_filesz);
+	ehdr->e_entry = (Elf64_Addr)(cave_segment->p_vaddr + cave_segment->p_memsz);
 	write(STDOUT_FILENO, "OK\n", 3);
 	printf("New entry point is -> 0x%lx\n", ehdr->e_entry);
+}
+
+void	modify_lengths( Elf64_Phdr *cave_segment, Elf64_Shdr *cave_section, const long parasite_len )
+{
 	cave_segment->p_filesz += parasite_len;
 	cave_segment->p_memsz += parasite_len;
+	cave_section->sh_size += parasite_len;
 }
 
 void	modify_parasite_jmp( const Elf64_Addr original_entry, uint8_t *parasite_code, const long parasite_len )
 {
 	write(STDOUT_FILENO, "Modifying jmp instruction ... ", 30);
+	printf("originale_entry == 0x%lx\n", original_entry);
 	long	index_jmp = 0;
 	
 	while (index_jmp < parasite_len && parasite_code[index_jmp] != 0xe9)	
 	{
 		index_jmp++;
 	}
-	if (*(parasite_code + index_jmp) != 0xe9)
+	if (index_jmp >= parasite_len || *(parasite_code + index_jmp) != 0xe9)
 	{
 		write(STDOUT_FILENO, "jmp instruction not found\n", 27);
 		return ;
 	}
-	for (uint8_t i = 0; i < 8; i++)
-	{
-		(parasite_code + index_jmp)[i + 1] = (uint8_t)original_entry >> i;
-	}
+	printf("original_entry == 0x%lx | jmp opcode == 0x%x | jmp + 1 opcode == 0x%x\n", original_entry, (parasite_code + index_jmp)[0], (parasite_code + index_jmp)[1]);
+	int32_t	jmp_offset = original_entry - (0x1175 + index_jmp + 5); 
+	memcpy(&parasite_code[index_jmp + 1], &jmp_offset, sizeof(int32_t));
 	write(STDOUT_FILENO, "OK\n", 3);
 }
 
 void	insert_code( void *cave, uint8_t *parasite_opcode, const long parasite_len )
 {
 	write(STDOUT_FILENO, "Inserting code in binary ... ", 30);
+	fflush(stdout);
 	memcpy(cave, parasite_opcode, parasite_len);
 	write(STDOUT_FILENO, "OK\n", 3);
 }
@@ -127,23 +159,30 @@ void	inject_code( void *ptr )
 	long	parasite_len = 0;
 	Elf64_Ehdr	*ehdr = ptr;
 	Elf64_Phdr	*phdr = (void *)ptr + ehdr->e_phoff;
-	Elf64_Phdr	*cave_segment = NULL;
+	Elf64_Shdr	*shdr = (void *)ptr + ehdr->e_shoff;
 	const Elf64_Addr original_entry = ehdr->e_entry;
 	(void) original_entry;
 
 	if (get_parasite_opcode(&parasite_opcode, &parasite_len) == NULL || parasite_opcode == NULL)
 		return ;
-	cave_segment = find_cave(ehdr, phdr, parasite_len);
-	if (cave_segment == NULL)
+	print_hexa(parasite_opcode, parasite_len);
+	phdr = find_cave_segment(ehdr, phdr, parasite_len);
+	if (phdr == NULL)
 		goto end_injection;
-	printf("Cave selected is %ld bytes long\n", (cave_segment + 1)->p_offset - (cave_segment->p_offset + cave_segment->p_filesz));
-	modify_entrypoint(ehdr, cave_segment, parasite_len);
+	shdr = find_cave_section(ehdr, shdr);
+	if (shdr == NULL)
+		goto end_injection;
+	modify_entrypoint(ehdr, phdr);
+	modify_lengths(phdr, shdr, parasite_len);
 
-	printf("Original entrypoint is 0x%lx | New entrypoint is 0x%lx\n", original_entry, ehdr->e_entry);
+	printf("Original entrypoint is %p | New entrypoint is %p\n", (void *)original_entry, (void *)ehdr->e_entry);
 	modify_parasite_jmp(original_entry, parasite_opcode, parasite_len);
-	printf("Copy parsite at %p\n", ptr + ehdr->e_entry);
-	insert_code(ptr + ehdr->e_entry, parasite_opcode, parasite_len);
+	print_hexa(parasite_opcode, parasite_len);
+	insert_code((void *)(ptr + ehdr->e_entry), parasite_opcode, parasite_len);
+	printf("code inserted at offset %lx \n", ehdr->e_entry);
 	// insert_code(ptr + cave_segment->p_offset + cave_segment->p_filesz, parasite_opcode, parasite_len);
+	printf("cave_segment->p_offset -> 0x%lx | cave_segment->filesz -> 0x%lx (%ld) | cave->segment->memzs -> 0x%lx (%ld) | cave_section->offset -> 0x%lx | cave_section->size -> 0x%lx\n"
+		, phdr->p_offset, phdr->p_filesz, phdr->p_filesz, phdr->p_memsz, phdr->p_memsz, shdr->sh_offset, shdr->sh_size);
 	
 	end_injection:
 		free(parasite_opcode);
@@ -152,7 +191,7 @@ void	inject_code( void *ptr )
 int	create_duplicated_file( void *ptr, long map_size )
 {
 	write(STDOUT_FILENO, "Creating the duplicate ... ", 27);
-	int	fd = open("woody", O_CREAT | O_TRUNC | O_RDWR, S_IRWXU);
+	int	fd = open("woody", O_CREAT | O_TRUNC | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
 	if (fd == -1)
 	{
 		(void) bool_perror("KO\nFailed to create duplicate", errno);
@@ -169,6 +208,7 @@ int	create_duplicated_file( void *ptr, long map_size )
 	write(STDOUT_FILENO, "OK\n", 3);
 	return (fd);
 }
+
 
 int	main( int argc, char **argv )
 {
@@ -191,7 +231,7 @@ int	main( int argc, char **argv )
 	if (ptr == MAP_FAILED)
 		exit_error("mmap: failed", errno);
 	write(STDOUT_FILENO, "OK\n", 3);
-	printf("New map address -> %p\n", ptr);
+	printf("New map 0x%lx bytes at address %p (to %p)\n", f_stat.st_size, ptr, f_stat.st_size + ptr);
 
 	write(STDOUT_FILENO, "Checking format ... ", 20);
 	fflush(stdout);
@@ -207,11 +247,39 @@ int	main( int argc, char **argv )
 	
 	if (fstat(dupfd, &f_stat) == -1)
 		exit_error("fstat: failed", errno);
-	ptr = mmap(NULL, f_stat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, dupfd, 0);
+	ptr = mmap(NULL, f_stat.st_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED, dupfd, 0);
 	if (ptr == MAP_FAILED)
 		exit_error("mmap: failed", errno);
 	inject_code(ptr);
 	
+	if (msync(ptr, f_stat.st_size, MS_SYNC) == -1)
+		exit_error("msync: failed", errno);
+	Elf64_Ehdr	*ehdr = ptr;
+	Elf64_Phdr	*phdr = ptr + ehdr->e_phoff;
+	printf("entrypoint == 0x%lx(%ld) | segment offset == 0x%lx(%ld) | end of segment == 0x%lx(%ld) | segment size == 0x%lx(%ld)\n"
+		, ehdr->e_entry,  ehdr->e_entry, phdr[3].p_offset, phdr[3].p_offset, 
+		phdr[3].p_offset + phdr[3].p_filesz, phdr[3].p_offset + phdr[3].p_filesz, 
+		phdr[3].p_filesz, phdr[3].p_filesz);
+	munmap(ptr, f_stat.st_size);
+	close(dupfd);
+	
+	
+	dupfd = open("woody", O_RDWR, 0);
+	if (dupfd == -1)
+		printf(">>> 2nd open failed\n");
+	bzero(&f_stat, sizeof((f_stat)));
+	if (fstat(dupfd, &f_stat) == -1)
+		exit_error("fstat: failed", errno);
+	printf("fstat size %ld\n", f_stat.st_size);
+	ptr = mmap(NULL, f_stat.st_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED, dupfd, 0);
+	if (ptr == MAP_FAILED)
+		exit_error("mmap: failed", errno);
+	ehdr = ptr;
+	phdr = (void *)ptr + ehdr->e_phoff;
+	printf("entrypoint == 0x%lx(%ld) | segment offset == 0x%lx(%ld) | end of segment == 0x%lx(%ld) | segment size == 0x%lx(%ld)\n"
+		, ehdr->e_entry,  ehdr->e_entry, phdr[3].p_offset, phdr[3].p_offset, 
+		phdr[3].p_offset + phdr[3].p_filesz, phdr[3].p_offset + phdr[3].p_filesz, 
+		phdr[3].p_filesz, phdr[3].p_filesz);
 	munmap(ptr, f_stat.st_size);
 	close(dupfd);
 	return (0);

@@ -9,3 +9,5 @@
 **/op_code
 **/*/*.o
 **/*/*.d
+hexdump
+objdump
