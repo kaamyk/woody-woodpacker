@@ -6,7 +6,7 @@ section .text
 _start:
 	mov rdi, 0x1
 	mov rsi, woody_str
-	mov rdx, 16
+	mov rdx, 0x10 
 	syscall
 	xor rax, rax
 	xor rdi, rdi
